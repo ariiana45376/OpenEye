@@ -1,0 +1,49 @@
+name: PE simulation
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  pe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      PYTHONPATH: ${{ github.workspace }}/src
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Install dependencies
+        id: setup
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends iverilog make util-linux
+          python -m pip install "cocotb==2.1.0" "numpy==2.5.4"
+          python -c "import open_eye.vh_file_creator; import open_eye.rtl_test_utils"
+          python --version
+          python -m pip freeze
+          iverilog -V
+
+      - name: Run PE with seed 42
+        timeout-minutes: 3
+        run: bash test/cocotb_PE/run_recorded.sh 42
+
+      - name: Run PE with seed 43
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 3
+        run: bash test/cocotb_PE/run_recorded.sh 43
+
+      - name: Save PE results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: pe-results
+          path: test/cocotb_PE/results/
+          if-no-files-found: error
+          retention-days: 90
