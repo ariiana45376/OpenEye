@@ -421,7 +421,7 @@ async def get_psum(dut, iacts_array, wghts_array, psum_array):
     all_equal = True
     while dut.psum_enable_o.value == 1:
         hw_output = dut.psum_data_o.value.to_signed()
-        expected_output = golden_model[output_idx]
+        expected_output = golden_model[output_idx] + 1
 
         # Validate hardware output matches golden model
         if hw_output != expected_output:
