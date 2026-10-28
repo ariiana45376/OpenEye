@@ -6,3 +6,4 @@
 *.fst
 *.fst.hier
 /cocotb_PE/results/
+/cocotb_PE_simple/results/

@@ -32,18 +32,25 @@ jobs:
 
       - name: Run PE with seed 42
         timeout-minutes: 3
-        run: bash test/cocotb_PE/run_recorded.sh 42
+        run: bash test/cocotb_PE/run_recorded.sh pe_seed42
 
       - name: Run PE with seed 43
         if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
         timeout-minutes: 3
-        run: bash test/cocotb_PE/run_recorded.sh 43
+        run: bash test/cocotb_PE/run_recorded.sh pe_seed43
+
+      - name: Run PE_simple with seed 42
+        if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
+        timeout-minutes: 3
+        run: bash test/cocotb_PE/run_recorded.sh pe_simple_seed42
 
       - name: Save PE results
         if: ${{ always() }}
         uses: actions/upload-artifact@v7
         with:
           name: pe-results
-          path: test/cocotb_PE/results/
+          path: |
+            test/cocotb_PE/results/
+            test/cocotb_PE_simple/results/
           if-no-files-found: error
           retention-days: 90
