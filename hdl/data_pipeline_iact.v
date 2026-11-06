@@ -250,7 +250,10 @@ module data_pipeline_iact #(
   //   Written into first_spad_data_o (as overhead_reg + 1) each time a
   //   non-zero sub-word is detected; tracks how many activations the MAC must
   //   accumulate before moving to the next first-SPAD address.
-  reg  [      SECOND_OVERHEAD_WIDTH-1 : 0] overhead_reg;
+  // Keep a valid width when dense mode has no overhead bits.
+  localparam integer OVERHEAD_REG_WIDTH =
+      (SECOND_OVERHEAD_WIDTH > 0) ? SECOND_OVERHEAD_WIDTH : 1;
+  reg [OVERHEAD_REG_WIDTH-1:0] overhead_reg;
 
   // enable_delay_reg: one-cycle delayed copy of enable_i.
   //   Used to detect the falling edge of enable_i so first_spad_words_o can
