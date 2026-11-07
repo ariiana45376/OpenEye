@@ -121,3 +121,23 @@ To support another testbench, extend the launcher's case
 selection, testbench invocation and output handling.
 Add the corresponding CI step and artifact path, then verify
 both successful execution and failure reporting.
+Recorded lint checks
+--------------------
+
+Run lint from the repository root:
+
+.. code-block:: bash
+
+   bash test/lint/run_recorded.sh pe_dense
+   bash test/lint/run_recorded.sh parallel
+
+Use ``pe_dense`` for the PE test configuration or ``parallel`` for
+``OpenEye_Parallel`` with its default parameters.
+
+Each run saves results in a new folder under ``test/lint/results/``:
+
+* ``output.log``: warnings and errors.
+* ``metadata.txt``: configuration, Git revision, tool version and exit status.
+* ``source.patch``: local changes to tracked files.
+
+A nonzero exit status means the check failed.
