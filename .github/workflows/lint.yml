@@ -1,17 +1,38 @@
 name: Lint
 on: [push, pull_request]
 
+permissions:
+  contents: read
+
 jobs:
   lint:
+    name: Lint (${{ matrix.profile }})
     runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    strategy:
+      fail-fast: false
+      matrix:
+        profile: [pe_dense, parallel]
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Check out source
+        uses: actions/checkout@v4
 
-      - name: install verilator
-        run: sudo apt install -y verilator
+      - name: Install Verilator
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y verilator
 
-      - name: run verilator lint
-        # PE.v and PE_cluster.v `include generated parameter headers that only
-        # exist in a simulation build directory; the ifdef fallbacks give the
-        # linter the same defaults.
-        run: verilator --lint-only -Wall -Ihdl/ +define+USE_INTERNAL_PARAMS_PE +define+USE_INTERNAL_PARAMS_PE_cluster hdl/lint_waivers.vlt hdl/OpenEye_Parallel.v
+      - name: Run recorded lint
+        timeout-minutes: 5
+        run: bash test/lint/run_recorded.sh "${{ matrix.profile }}"
+
+      - name: Upload lint results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: lint-${{ matrix.profile }}
+          path: test/lint/results/
+          if-no-files-found: error
+          retention-days: 14
