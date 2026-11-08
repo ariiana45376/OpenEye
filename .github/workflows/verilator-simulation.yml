@@ -1,0 +1,51 @@
+name: Verilator simulation (Docker)
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  pe-verilator:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Build simulation image
+        timeout-minutes: 20
+        run: docker build --progress=plain -t openeye-sim:verilator-5.036 .
+
+      - name: Record image identity
+        run: |
+          mkdir -p test/cocotb_PE/results
+          docker image inspect openeye-sim:verilator-5.036 --format '{{.Id}}' > test/cocotb_PE/results/container-image.txt
+
+      - name: Check container tools
+        run: |
+          docker run --rm openeye-sim:verilator-5.036 verilator --version
+          docker run --rm openeye-sim:verilator-5.036 cocotb-config --version
+          docker run --rm openeye-sim:verilator-5.036 cocotb-config --libpython
+
+      - name: Run PE with Verilator
+        timeout-minutes: 5
+        run: |
+          docker run --rm \
+            --user "$(id -u):$(id -g)" \
+            --mount "type=bind,source=$PWD,target=/workspace" \
+            --env SIM=verilator \
+            openeye-sim:verilator-5.036
+          test -s test/cocotb_PE/results/verilator_seed42.*/metadata.txt
+          test -s test/cocotb_PE/results/verilator_seed42.*/output.log
+          test -s test/cocotb_PE/results/verilator_seed42.*/results.xml
+
+      - name: Upload Verilator results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: verilator-pe-results
+          path: test/cocotb_PE/results/
+          if-no-files-found: error
+          retention-days: 90
