@@ -5,6 +5,12 @@ if (( $# > 1 )); then
     echo "Usage: $0 [seed|case]" >&2
     exit 2
 fi
+sim=${SIM:-icarus}
+case "$sim" in
+    icarus) version_cmd=(iverilog -V) ;;
+    verilator) version_cmd=(verilator --version) ;;
+    *) echo "Unknown simulator: $sim (use icarus or verilator)" >&2; exit 2 ;;
+esac
 case_name=${1-42}
 testbench=PE
 case $case_name in
@@ -21,8 +27,8 @@ mkdir -p results
 # Headers and CSV files remain shared; run sequentially with other tests here.
 exec 9>results/.run.lock
 flock -n 9 || { echo "Another recorded $testbench run is active" >&2; exit 1; }
-run_dir=$(mktemp -d "$PWD/results/seed${seed}.XXXXXX")
-command=(make run SIM=icarus "SEED=$seed"
+run_dir=$(mktemp -d "$PWD/results/${sim}_seed${seed}.XXXXXX")
+command=(make run "SIM=$sim" "SEED=$seed"
     "SIM_BUILD=$run_dir/sim_build"
     "COCOTB_RESULTS_FILE=$run_dir/results.xml"
     "COCOTB_PLUSARGS=+FST_PATH=$run_dir/$testbench.fst")
@@ -30,7 +36,15 @@ command=(make run SIM=icarus "SEED=$seed"
     printf 'case=%s\nseed=%s\nworking_directory=%s\ncommand=cd %q && ' "$case_name" "$seed" "$PWD" "$PWD"
     printf '%q ' "${command[@]}"
     printf '\n'
+    printf 'simulator=%s\nsource_revision=%s\n' "$sim" "$(git rev-parse HEAD)"
+    printf 'tool_version:\n'
+    if ! "${version_cmd[@]}" 2>&1; then
+        printf 'Version query failed; see output.log for the simulation result.\n'
+    fi
+    printf 'working_tree:\n'
+    git status --short
 } > "$run_dir/metadata.txt"
+git diff --binary HEAD > "$run_dir/source.patch"
 printf 'Results: %s\n' "$run_dir"
 
 set +e
