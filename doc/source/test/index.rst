@@ -3,11 +3,10 @@
 Tests and Verification
 ======================
 
-The simulation framework runs OpenEye Cocotb testbenches with
-Icarus Verilog. The launcher
-``test/cocotb_PE/run_recorded.sh`` provides a shared entry point
-for local execution and GitHub Actions, recording each run in
-a separate results directory.
+The launcher ``test/cocotb_PE/run_recorded.sh`` runs selected
+Cocotb tests locally and in GitHub Actions. Icarus is the default
+simulator. The ``pe_seed42`` case is also checked with Verilator,
+including execution in Docker. Each run has its own results directory.
 
 Simulation cases
 ----------------
@@ -57,46 +56,90 @@ The other cases are invoked with:
 Run cases sequentially because generated parameter and input
 files may be shared.
 
+Verilator simulation
+--------------------
+
+Use Cocotb 2.1.0 and Verilator 5.036 or newer. With a compatible
+``verilator`` executable on ``PATH``, run:
+
+.. code-block:: bash
+
+   SIM=verilator bash test/cocotb_PE/run_recorded.sh pe_seed42
+
+To select another installation for one run, prefix the command with
+``PATH="/path/to/verilator/bin:$PATH"``, using its actual bin directory.
+Verilator waveform tracing is disabled by default.
+
+Docker simulation
+-----------------
+
+Docker supplies the Python environment and simulators.
+With Docker running, build the image from the repository root:
+
+.. code-block:: bash
+
+   docker build --progress=plain -t openeye-sim:verilator-5.036 .
+
+Run ``pe_seed42`` with Verilator inside the container:
+
+.. code-block:: bash
+
+   docker run --rm \
+       --user "$(id -u):$(id -g)" \
+       --mount "type=bind,source=$PWD,target=/workspace" \
+       --env SIM=verilator \
+       openeye-sim:verilator-5.036
+   printf 'Exit status: %s\n' "$?"
+
+The mounted checkout preserves results in
+``test/cocotb_PE/results/`` after the container exits.
+
+
 Recorded outputs
 ----------------
 
-The launcher prints the results directory for each run.
-Results are stored under:
+Each run prints its unique results directory:
 
 * PE: ``test/cocotb_PE/results/``
 * PE_simple: ``test/cocotb_PE_simple/results/``
 
 The recorded outputs include:
 
-* ``metadata.txt``: case, seed, working directory, command
-  and exit status.
+* ``metadata.txt``: case, seed, simulator, source revision, tool version,
+  working directory, command, local Git status and exit status.
 * ``output.log``: build output and simulation summary.
 * ``results.xml``: Cocotb test results, when generated.
+* ``source.patch``: changes to tracked files relative to the recorded revision.
 * ``PE.fst`` or ``PE_simple.fst``: waveforms, when generated.
 * ``sim_build/``: simulator build files.
 
-Check the exit status and the Cocotb summary when assessing
-a run. Failed or interrupted runs may have incomplete outputs.
+Untracked files are listed in the metadata but their contents are
+not included in ``source.patch``.
 
-For reproducibility, record the tested Git commit, local
-modifications and tool versions alongside the results.
+Check the exit status and Cocotb summary. Failed or interrupted runs
+may have incomplete outputs.
+
 
 GitHub Actions
 --------------
 
-The workflow is defined in
-``.github/workflows/pe-simulation.yml`` and runs on pushes
-and pull requests.
+Both simulation workflows run on pushes and pull requests:
 
-To inspect a run:
+* ``PE simulation`` (``.github/workflows/pe-simulation.yml``) runs
+  the three Icarus cases and saves the ``pe-results`` artifact.
+* ``Verilator simulation (Docker)``
+  (``.github/workflows/verilator-simulation.yml``) builds the image,
+  runs ``pe_seed42`` and saves ``verilator-pe-results``.
 
-1. Open the repository's Actions tab.
-2. Select a ``PE simulation`` run.
-3. Inspect the individual simulation steps.
-4. Download the ``pe-results`` artifact for the recorded outputs.
+The Docker artifact also contains ``container-image.txt``, which
+identifies the built image.
+
+Open the repository's Actions tab, select the workflow run, inspect
+its steps and download the artifact.
 
 Artifact upload is attempted even after a simulation failure.
 A failure before output creation may leave no files to upload.
+
 
 Extending the framework
 -----------------------
@@ -121,6 +164,7 @@ To support another testbench, extend the launcher's case
 selection, testbench invocation and output handling.
 Add the corresponding CI step and artifact path, then verify
 both successful execution and failure reporting.
+
 Recorded lint checks
 --------------------
 
@@ -141,3 +185,6 @@ Each run saves results in a new folder under ``test/lint/results/``:
 * ``source.patch``: local changes to tracked files.
 
 A nonzero exit status means the check failed.
+
+The ``Lint`` workflow runs both profiles and saves the
+``lint-pe_dense`` and ``lint-parallel`` artifacts.

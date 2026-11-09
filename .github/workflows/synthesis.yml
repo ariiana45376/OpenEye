@@ -1,0 +1,37 @@
+name: Synthesis
+
+on: [push, pull_request]
+
+permissions:
+  contents: read
+
+jobs:
+  pe-dense:
+    name: PE dense synthesis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v7
+
+      - name: Install Yosys
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y yosys=0.33-5build2 yosys-abc=0.33-5build2 python3
+          yosys -V
+
+      - name: Run recorded synthesis
+        timeout-minutes: 10
+        run: |
+          bash -n yosys/run_recorded.sh
+          bash yosys/run_recorded.sh pe_dense
+
+      - name: Upload synthesis results
+        if: ${{ always() }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: synthesis-pe-dense
+          path: yosys/results/
+          if-no-files-found: error
+          retention-days: 90
