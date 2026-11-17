@@ -461,14 +461,15 @@ module PE #(
       `include "parameters_PE.vh"
         // Defaultvalues
     `endif
-    parameter integer NUM_GLB_IACT       = 3,
-    parameter integer DATA_PSUM_BITWIDTH = 20,
-    parameter IS_TOPLEVEL = 1,
-    parameter SERIAL      = 1,
+    parameter integer NUM_GLB_IACT           = 3,
+    parameter integer DATA_PSUM_BITWIDTH     = 20,
+    parameter IS_TOPLEVEL                    = 1,
+    parameter SERIAL                         = 1,
+    parameter DEPTHWISE_ENABLED              = 1,
 
-    parameter integer USE_DSP          = 0,  // 0=standard multiplier+adder (default), 1=DSP48 slice optimization
+    parameter integer USE_DSP                = 0,  // 0=standard multiplier+adder (default), 1=DSP48 slice optimization
     // Approach 3: when 1, expose horizontal iact pass-through ports for systolic GEMM dataflow
-    parameter integer SYSTOLIC_GEMM_EN = 0,
+    parameter integer SYSTOLIC_GEMM_EN       = 0,
 
     parameter integer DATA_IACT_BITWIDTH     = 8,
     parameter integer DATA_WGHT_BITWIDTH     = 8,
@@ -527,6 +528,7 @@ module PE #(
     input                                             compute_i,
     input                                             enable_stream_i,
     input      [                                11:0] data_stream_i,
+    input                                             dw_mode,
     // Approach 3: horizontal iact pass-through for systolic GEMM
     // Active only when SYSTOLIC_GEMM_EN=1; otherwise tied to 0 / ignored
     input      [         DATA_IACT_BITWIDTH-1:0]      iact_pass_data_i,
@@ -581,6 +583,7 @@ module PE #(
 
   // FSM control flags
   reg                                   fast_cycle;             // Flag for fast processing cycle
+  wire                                  dw_mode_w;
   reg                                   computing;              // Flag indicating active computation
   reg                                   iact_set;               // Flag: input activation data loaded
   reg                                   wght_set;               // Flag: weight data loaded
@@ -659,13 +662,13 @@ module PE #(
   // Word counters from data pipeline modules (indicating amount of valid data loaded)
   wire [                         3 : 0] first_spad_words_iact_S;// # of words in iact addr SPad, in Eyeriss-Paper referenced as S
   wire [                         4 : 0] second_spad_words_iact; // # of words in iact data SPad
-  wire [                         4 : 0] first_spad_words_wght;  // # of words in wght addr SPad
+  wire [ $clog2(WGHT_ADDR_ADDR+1)-1: 0] first_spad_words_wght;  // # of words in wght addr SPad
   wire [ WGHT_DATA_ADDR_BITWIDTH-1 : 0] second_spad_words_wght; // # of words in wght data SPad
 
   // Computation control and configuration registers
   // [SPARSITY_EN=1 only] Weight data validity flag (always true in dense mode)
   reg                                   values_valid;           // Flag: current values are valid (not zero)
-  wire [                         5 : 0] filters_reg_M0;            // Number of filters configured, in Eyeriss-Paper referenced as M0
+  wire [$clog2(WGHT_ADDR_ADDR+1)   : 0] filters_reg_M0;            // Number of filters configured, in Eyeriss-Paper referenced as M0
   wire [                         3 : 0] channel_reg_C0;            // Number of channels configured, in Eyeriss-Paper referenced as C0
   wire                                  psum_data_SPad_en_w_i [PARALLEL_MACS-1: 0];// Internal write enable
   wire                                  raw_wght_w;           // 1 = raw (uncompressed) weight stream: keep all-zero weight words
@@ -766,6 +769,7 @@ module PE #(
   // Data loading handshaking - both iact and wght must be loaded before compute
   assign data_set       = iact_set & wght_set;
   assign mux_iact_c_i_w = mux_iact_ready;
+  assign dw_mode_w = DEPTHWISE_ENABLED ? dw_mode : 0;
 
   // A compute trigger that arrives while the PE is still reading out the
   // previous pass (WAIT_TO_SEND_PSUM / SEND_PSUM) used to be dropped, yet it
@@ -856,10 +860,10 @@ module PE #(
     // Adder summand 1: select psum source with bypass logic
     // Priority: zero if not accumulating > adder bypass > SPad bypass > normal SPad read
     assign adder_summand_1[pmc] =
-                  !use_psum[pmc] ? 0 :                      // First accumulation: use 0
-                  (reuse_adder_data[pmc][pmc] ? adder_o_w[pmc] :   // Forward adder 1 output
-                  (reuse_psum_spad[pmc] ? reused_data[pmc] :    // Use bypassed SPad data
-                  psum_spad_data_o[pmc]));                 // Normal SPad read
+                  !use_psum[pmc] ? 0 :                           // First accumulation: use 0
+                  (reuse_adder_data[pmc][pmc] ? adder_o_w[pmc] : // Forward adder 1 output
+                  (reuse_psum_spad[pmc] ? reused_data[pmc] :     // Use bypassed SPad data
+                  psum_spad_data_o[pmc]));                       // Normal SPad read
   end
 
 
@@ -1339,9 +1343,8 @@ module PE #(
             // BLOCK 1b: WEIGHT VECTOR INCREMENT
             // ================================================================
             // Advance through weight data for current activation
-            if (wght_data_vec < (second_spad_words_wght - 1)) begin
-              wght_data_vec <= wght_data_vec + 1; // Increment weight index
-            end else begin
+            wght_data_vec <= wght_data_vec + 1; // Increment weight index
+            if (wght_data_vec >= (second_spad_words_wght - 1)) begin
               mux_iact_ready <= 1;                 // Signal ready for next activation
             end
 
@@ -1752,7 +1755,6 @@ module PE #(
           IDLE: begin
             mux_iact_ready         <= 1;
             wght_ready_o           <= 1;
-            fast_cycle             <= 0;
             iact_addr_SPad_addr    <= 0;
             iact_addr_SPad_en_r    <= 0;
             iact_data_SPad_addr    <= 0;
@@ -1815,10 +1817,14 @@ module PE #(
           LOADING_1: begin
             current_state_computing <= CALCULATING;
             iact_data_current_3     <= iact_data_spad_pay;
-            if (PARALLEL_MACS >= filters_reg_M0 ) begin
+            if (PARALLEL_MACS >= filters_reg_M0) begin
               iact_data_SPad_addr <= iact_data_SPad_addr + 1;
             end else begin
               wght_filter <= wght_filter + PARALLEL_MACS;
+            end
+            if (dw_mode_w) begin
+              wght_filter <= wght_filter + PARALLEL_MACS;
+              iact_data_SPad_addr <= iact_data_SPad_addr + 1;
             end
             for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
               psum_spad_addr_mem[mac_i] <= mac_i[PSUM_ADDR_BITWIDTH-1:0];
@@ -1840,17 +1846,21 @@ module PE #(
             computing_1         <= computing;
             computing_2         <= computing_1;
             iact_data_current_3 <= iact_data_spad_pay;
-            iact_addr_SPad_en_r <= 0;
             iact_data_SPad_en_r <= !mux_iact_ready;
-            wght_addr_SPad_en_r <= 0;           // No weight addr SPad in dense mode
             for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
               psum_data_SPad_en_r[mac_i] <= 1;
               psum_data_SPad_en_w[mac_i] <= psum_data_SPad_en_r[mac_i];
               reuse_psum_spad[mac_i]     <= 0;
               reused_data[mac_i]         <= 0;
             end
-            fast_cycle   <= 0;
             values_valid <= 1; // Default: data is valid
+            for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
+              if (psum_spad_addr_r[mac_i] == psum_spad_addr_w[mac_i]) begin
+                // Port A read conflicts with Port A write
+                reuse_psum_spad[mac_i] <= 1;       // Enable forwarding
+                reused_data[mac_i]     <= adder_o_w[mac_i]; // Use adder 1 output
+              end
+            end
 
             // ---------------------------------------------------------------
             // Weight vector increment (sequential, no range computation)
@@ -1883,8 +1893,14 @@ module PE #(
             // ---------------------------------------------------------------
 
             wght_filter <= wght_filter + PARALLEL_MACS;
-            if (wght_filter >= filters_reg_M0 - PARALLEL_MACS) begin
-              wght_filter          <= 0;
+            if (wght_filter >= filters_reg_M0 - PARALLEL_MACS | dw_mode_w) begin
+              if (!dw_mode_w) begin
+                wght_filter <= 0;
+              end else begin
+                if (wght_filter == filters_reg_M0 - 1) begin
+                  wght_filter <= 0;
+                end
+              end
               iact_channel         <= iact_channel + 1;
               iact_data_SPad_addr  <= iact_data_SPad_addr + 1;
               if (((channel_reg_C0 * iact_addr_max_reg) - 1 == iact_channel)) begin
@@ -1892,23 +1908,14 @@ module PE #(
                 current_state_computing <= WAIT_TO_SEND_PSUM;
                 wght_ready_o            <= 1;
                 mux_iact_ready          <= 1;
-                for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
-                  psum_data_SPad_en_w[mac_i] <= 1;
-                end
-              end else begin
-                for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
-                  psum_data_SPad_en_w[mac_i] <= 1;
-                end
+              end
+              for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
+                psum_data_SPad_en_w[mac_i] <= 1;
               end
             end
             if (computing) begin
               for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
                 psum_spad_addr_mem[mac_i]  <= psum_spad_addr_mem[PARALLEL_MACS-1] + 1 + mac_i;
-              end
-              if (PARALLEL_MACS == 1) begin
-                for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
-                  psum_spad_addr_mem[mac_i]  <= psum_spad_addr_mem[mac_i] + 1;
-                end
               end
             end
             if (wght_filter == PARALLEL_MACS) begin
@@ -1943,6 +1950,10 @@ module PE #(
             computing             <= 0;
             values_valid          <= computing;
             computing_1           <= computing;
+            if (dw_mode_w) begin
+              values_valid <= 0;
+              computing_1  <= 0;
+            end
             computing_2           <= computing_1;
             iact_addr_SPad_addr   <= computing;
             iact_addr_SPad_en_r   <= 0;
@@ -1953,6 +1964,19 @@ module PE #(
             for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
               psum_data_SPad_en_r[mac_i] <= computing;
               psum_data_SPad_en_w[mac_i] <= 1;
+            end
+            if (values_valid) begin
+              for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
+                adder_en[mac_i] <= 1;
+                if (used_psum_memory[mac_i][(psum_spad_addr_r[mac_i])] == 1) begin
+                  use_psum[mac_i] <= 1;
+                end else begin
+                  use_psum[mac_i] <= 0;
+                  used_psum_memory[mac_i][(psum_spad_addr_r[mac_i])] <= 1;
+                end
+                psum_spad_addr_delay[mac_i] <= psum_spad_addr_r[mac_i];
+                psum_spad_addr_w[mac_i]     <= psum_spad_addr_delay[mac_i];
+              end
             end
             if (computing) begin
               for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
@@ -1966,7 +1990,6 @@ module PE #(
             end
             for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
               psum_spad_addr_delay[mac_i] <= psum_spad_addr_r[mac_i];
-              psum_spad_addr_w[mac_i]     <= mac_i[PSUM_ADDR_BITWIDTH-1:0] + PARALLEL_MACS_ADDR;
               adder_en[mac_i]             <= values_valid;
                 if (computing_2) begin
                   psum_spad_addr_w[mac_i] <= psum_spad_addr_delay[mac_i];
@@ -1998,9 +2021,9 @@ module PE #(
                 adder_en[mac_i]            <= 1;
                 psum_data_SPad_en_w[mac_i] <= 1;
                 psum_spad_addr_w[mac_i]    <= psum_spad_addr_r[mac_i];
-                psum_spad_addr_mem[mac_i] <= psum_spad_addr_r[mac_i] + 1;
+                psum_spad_addr_mem[mac_i]  <= psum_spad_addr_r[mac_i] + 1;
                 if (used_psum_memory[mac_i][(psum_spad_addr_r[mac_i])] == 1) begin
-                  use_psum[mac_i]                                  <= 1;
+                  use_psum[mac_i]                                    <= 1;
                   used_psum_memory[mac_i][(psum_spad_addr_r[mac_i])] <= 0;
                 end else begin
                   use_psum[mac_i] <= 0;
@@ -2015,13 +2038,14 @@ module PE #(
                 end
               end
             end
-            psum_select <= !computing_1;
+            psum_select <= !computing_1 & !computing;
           end
 
           // ==================================================================
           // SEND_PSUM: Stream results to output (identical to sparse FSM)
           // ==================================================================
           SEND_PSUM: begin
+            wght_filter <= 0;
             psum_select <= !computing;
             for (mac_i = 0; mac_i < PARALLEL_MACS; mac_i=mac_i+1) begin
               psum_spad_addr_w[mac_i] <= psum_spad_addr_r[mac_i];
@@ -2037,7 +2061,7 @@ module PE #(
               psum_spad_addr_mem[mac_i] <= psum_spad_addr_r[mac_i] + 1;
               adder_tree_en              <= 1;
               if (used_psum_memory[mac_i][(psum_spad_addr_r[mac_i])] == 1) begin
-                use_psum[mac_i]                                  <= 1;
+                use_psum[mac_i]                                    <= 1;
                 used_psum_memory[mac_i][(psum_spad_addr_r[mac_i])] <= 0;
               end else begin
                 use_psum[mac_i] <= 0;
