@@ -187,9 +187,9 @@ class OpenEyeParameters(object):
 
         # Width of IACT GLBs
         try:
-            self.BUFFER_WIDTH = int(os.getenv("BUFFER_WIDTH"))
+            self.BUFFER_WIDTH_IACT = int(os.getenv("BUFFER_WIDTH_IACT"))
         except:
-            self.BUFFER_WIDTH = 10
+            self.BUFFER_WIDTH_IACT = 10
 
         # Width of WGHT GLBs
         try:
@@ -232,7 +232,7 @@ class OpenEyeParameters(object):
         try:
             self.SPARSITY_EN = int(os.getenv("SPARSITY_EN"))
         except:
-            self.SPARSITY_EN = 1        # Sparsity enabled
+            self.SPARSITY_EN = 1          # Sparsity enabled
 
         try:
             self.DMA_BITWIDTH = int(os.getenv("DMA_BITWIDTH"))
@@ -242,7 +242,39 @@ class OpenEyeParameters(object):
         try:
             self.STRIDE_ENABLED = int(os.getenv("STRIDE_ENABLED"))
         except:
-            self.STRIDE_ENABLED = 0          # AXI bus width for DMA transfers (64 bits)
+            self.STRIDE_ENABLED = 0         # Enable or Disable Stride ability
+
+        try:
+            self.CYCLE_WIDTH = int(os.getenv("CYCLE_WIDTH"))
+        except:
+            self.CYCLE_WIDTH = 16        # Width of cycle counters
+
+        try:
+            self.LIMIT_SIZE_IACT = int(os.getenv("LIMIT_SIZE_IACT"))
+        except:
+            self.LIMIT_SIZE_IACT = 16        # Width of iact limit
+
+        try:
+            self.LIMIT_SIZE_WGHT = int(os.getenv("LIMIT_SIZE_WGHT"))
+        except:
+            self.LIMIT_SIZE_WGHT = 16        # Width of wght limit
+
+        try:
+            self.LIMIT_SIZE_PSUM = int(os.getenv("LIMIT_SIZE_PSUM"))
+        except:
+            self.LIMIT_SIZE_PSUM = 16        # Width of psum limit
+
+        try:
+            self.DEPTHWISE_ENABLED = int(os.getenv("DEPTHWISE_ENABLED"))
+        except:
+            self.DEPTHWISE_ENABLED = 16        # Enable DW Conv Calculations
+
+        try:
+            self.CHANNEL_CYCLE_WIDTH = int(os.getenv("CHANNEL_CYCLE_WIDTH"))
+        except:
+            self.CHANNEL_CYCLE_WIDTH = 16       # Width of Channel counters
+
+            
 
         # === COMMUNICATION MODE ===
         self.SERIAL = serial           # Serial (DMA) vs parallel communication mode
@@ -276,9 +308,10 @@ class OpenEyeParameters(object):
         self.WGHT_Addr_Bitwidth = 7    # Weight address: 7 bits (128 locations)
 
         # Transmission bitwidths for data movement across routers
-        self.IACT_Trans_Bitwidth = 2 * self.IACT_WOH_Bitwidth  # Activation transmission: 24 bits
-        self.WGHT_Trans_Bitwidth = self.WGHT_WOH_Bitwidth * self.PARALLEL_MACS  # Weight transmission: 24 bits
-        self.PSUM_Trans_Bitwidth = self.DATA_PSUM_BITWIDTH * self.PARALLEL_MACS  # PSUM transmission: 40 bits (2 MACs)
+        self.MAX_CHANNELS_IACT_GLB = 2
+        self.IACT_Trans_Bitwidth   = self.MAX_CHANNELS_IACT_GLB * self.IACT_WOH_Bitwidth  # Activation transmission: 24 bits
+        self.WGHT_Trans_Bitwidth   = self.WGHT_WOH_Bitwidth * self.PARALLEL_MACS  # Weight transmission: 24 bits
+        self.PSUM_Trans_Bitwidth   = self.DATA_PSUM_BITWIDTH * self.PARALLEL_MACS  # PSUM transmission: 40 bits (2 MACs)
 
         # === DERIVED DIMENSIONS ===
         # Calculate total cluster and PE counts from base parameters
@@ -336,10 +369,10 @@ class OpenEyeParameters(object):
         self.Wght_Router_Bits = 1      # Weight router config: 1 bit (2 modes)
         self.Psum_Router_Bits = 3      # Partial sum router config: 3 bits (8 modes)
 
-        self.IACT_RAM_CELLS_WORD_BITWIDTH = 64
+        self.IACT_RAM_CELLS_WORD_BITWIDTH = 4 * self.IACT_Trans_Bitwidth
         self.WGHT_RAM_CELLS_WORD_BITWIDTH = self.WGHT_Trans_Bitwidth
-        self.PSUM_RAM_CELLS_WORD_BITWIDTH = 64
-        self.DATA_IACT_BITWIDTH = 8
+        self.PSUM_RAM_CELLS_WORD_BITWIDTH = 2 * self.DATA_PSUM_BITWIDTH
+        self.DATA_IACT_BITWIDTH = self.IACT_Bitwidth
         self.IACT_WORDS_IN_RAM = self.IACT_RAM_CELLS_WORD_BITWIDTH//self.DATA_IACT_BITWIDTH
 
         # === QUANTIZATION PARAMETER BITWIDTHS ===
@@ -349,7 +382,6 @@ class OpenEyeParameters(object):
         self.EXPONENT_WIDTH = 7        # Bitwidth for right-shift exponent (7 bits)
         self.MANTISSA_WIDTH = 25       # Bitwidth for scale mantissa (25 bits)
 
-        self.WORDS_PER_CYCLE = 2
 
 
 
